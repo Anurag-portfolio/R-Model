@@ -1,0 +1,39 @@
+install.packages(c("xgboost", "caret", "Matrix"))
+library(xgboost)
+library(caret)
+library(Matrix)
+# For modeling
+train_data <- read.csv("train.csv")
+test_data <- read.csv("test.csv")
+train_data$interaction_clicks_visits <- with(train_data, clicks / ifelse(visits == 0, 1, visits))
+test_data$interaction_clicks_visits <- with(test_data, clicks / ifelse(visits == 0, 1, visits))
+train_data$churn <- factor(train_data$churn, levels = c(0, 1), labels = c("NonChurn", "Churn"))
+train_matrix <- as.matrix(train_data[, -which(names(train_data) %in% c("id", "churn"))])
+test_matrix <- as.matrix(test_data[, -which(names(test_data) == "id")])
+dtrain <- xgb.DMatrix(data = train_matrix, label = as.numeric(train_data$churn) - 1)
+dtest <- xgb.DMatrix(data = test_matrix)
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "auc",
+  max_depth = 4, # More conservative
+  eta = 0.01, # Slower learning
+  gamma = 1, # Minimum loss reduction
+  subsample = 0.8,
+  colsample_bytree = 0.8,
+  lambda = 10, # Increased L2 regularization
+  alpha = 1 # Increased L1 regularization
+)
+nrounds <- 1000
+cv_results <- xgb.cv(params = params, data = dtrain, nfold = 5, nrounds = nrounds,
+                     early_stopping_rounds = 10, maximize = TRUE, showsd = TRUE,
+                     stratified = TRUE, print_every_n = 10)
+
+best_nrounds <- cv_results$best_iteration
+final_model <- xgb.train(params = params, data = dtrain, nrounds = best_nrounds)
+predictions_xgb <- predict(final_model, newdata = dtest)
+
+
+submission <- data.frame(id = test_data$id, churn = predictions_xgb)
+write.csv(submission, "final_submission_with_mitigation.csv", row.names = FALSE)
+
+write.csv(submission, file = "/Users/meenavittal/Desktop/underfitting.csv", row.names = FALSE)
